@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leakage Detective</title>
+<meta name="description" content="A game: spot the features that leak the answer in 12 prediction tasks.">
+<style>
+:root{
+  --bg:#f5f4f0; --panel:#fff; --ink:#1d1e22; --muted:#6c6e76; --line:#e4e2dc; --soft:#efeee9;
+  --accent:#6a4bd6; --leak:#c9413a; --safe:#1f8a5b; --warn:#c98a12; --shadow:0 2px 10px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#131418; --panel:#1b1c21; --ink:#ebecef; --muted:#9a9ea8; --line:#2c2e35; --soft:#23252b; --accent:#a48cff; --shadow:0 2px 12px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{ --bg:#131418; --panel:#1b1c21; --ink:#ebecef; --muted:#9a9ea8; --line:#2c2e35; --soft:#23252b; --accent:#a48cff; --shadow:0 2px 12px rgba(0,0,0,.4); }
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-size:25px;margin:4px 0}
+.muted{color:var(--muted)} .small{font-size:13px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);margin-top:14px}
+.hud{display:flex;gap:14px;font-size:14px;color:var(--muted)} .hud b{color:var(--ink);font-variant-numeric:tabular-nums}
+.progress{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:10px}
+.progress div{height:100%;background:var(--accent);transition:width .3s}
+.task{font-size:19px;font-weight:700;margin:2px 0 6px}
+.when{display:inline-block;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:700;border-radius:8px;padding:3px 10px;font-size:14px}
+.timeline{display:flex;margin:14px 0 4px;position:relative}
+.timeline::before{content:"";position:absolute;left:8px;right:8px;top:7px;height:2px;background:var(--line)}
+.tl{flex:1;text-align:center;font-size:12px;color:var(--muted);position:relative;padding-top:20px}
+.tl::before{content:"";position:absolute;top:2px;left:50%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--line)}
+.tl.now{color:var(--accent);font-weight:700}
+.tl.now::before{background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent)}
+.tl.future{opacity:.85}
+.feats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.feat{border:2px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--panel);text-align:left;font:inherit;color:var(--ink);transition:border-color .12s,background .12s}
+.feat code{font-size:13.5px;font-weight:600}
+.feat .tag{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.feat[aria-pressed="true"]{border-color:var(--leak);background:color-mix(in srgb,var(--leak) 8%,transparent)}
+.feat[aria-pressed="true"] .tag::before{content:"🚩 flagged as leak"}
+.feat[aria-pressed="false"] .tag::before{content:"tap to flag"}
+.feat.revealed{cursor:default}
+.feat.revealed .tag::before{content:none}
+.feat.right{border-color:var(--safe)}
+.feat.wrong{border-color:var(--leak);background:color-mix(in srgb,var(--leak) 10%,transparent)}
+.feat .why{font-size:13px;margin-top:6px;color:var(--ink)}
+.verdict{font-weight:700;font-size:13px}
+.verdict.ok{color:var(--safe)} .verdict.bad{color:var(--leak)}
+.actions{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-top:16px;flex-wrap:wrap}
+.btn{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:10px;padding:10px 18px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.levelscore{font-size:15px;font-weight:700}
+.bar{display:grid;grid-template-columns:240px 1fr 40px;gap:10px;align-items:center;margin:6px 0;font-size:14px}
+.bar .t{height:14px;background:var(--soft);border-radius:4px;overflow:hidden}
+.bar .t div{height:100%}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:6px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.big{font-size:42px;font-weight:800;line-height:1.1}
+.hero{text-align:center;padding:28px 18px}
+.rule{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0;text-align:left}
+.rule div{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:14px}
+@media (max-width:640px){ .feats{grid-template-columns:1fr} .bar{grid-template-columns:130px 1fr 32px} .rule{grid-template-columns:1fr} .tl{font-size:10.5px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🕵️ Leakage Detective</h1>
+    <div class="hud" id="hud" hidden><span>Level <b id="hLevel">1</b>/12</span><span>Score <b id="hScore">0</b></span><span>Best <b id="hBest">–</b></span></div>
+  </header>
+  <div class="progress" id="prog" hidden><div id="progBar"></div></div>
+
+  <section class="panel hero" id="intro">
+    <div class="big">🕵️</div>
+    <h2>Which features leak the answer?</h2>
+    <p class="muted">A model can only use what's known <b>at the moment the prediction is made</b>. In each of 12 cases, flag every feature that sneaks in information from after that moment, or from the outcome itself. Leaky models look brilliant in testing and fail in production.</p>
+    <div class="rule">
+      <div>🚩 <b>Leaks</b>: measured after the prediction moment · created by the outcome · aggregates that include the future · downstream decisions that already know the answer</div>
+      <div>✅ <b>Fine</b>: known at the prediction moment · history from before it</div>
+    </div>
+    <p class="small muted">Scoring: +1 for every feature you classify correctly (flag the leaks, leave the safe ones). +2 bonus for a perfect level.</p>
+    <button class="btn primary" id="start">Start the case files</button>
+  </section>
+
+  <section class="panel" id="level" hidden>
+    <div class="small muted" id="lvTitle"></div>
+    <div class="task" id="lvTask"></div>
+    <div>Prediction made: <span class="when" id="lvWhen"></span></div>
+    <div class="timeline" id="lvTimeline"></div>
+    <div class="feats" id="lvFeats"></div>
+    <div class="actions">
+      <span class="levelscore" id="lvScore"></span>
+      <span><button class="btn primary" id="submit">Submit</button><button class="btn primary" id="next" hidden>Next case →</button></span>
+    </div>
+  </section>
+
+  <section class="panel" id="end" hidden>
+    <div class="hero" style="padding:8px">
+      <div class="small muted">Case closed</div>
+      <div class="big" id="endScore"></div>
+      <div id="endSub" class="muted"></div>
+    </div>
+    <h3>Your mistakes by type</h3>
+    <div id="endTypes"></div>
+    <h3>Features you got wrong</h3>
+    <table id="endList"></table>
+    <div class="actions"><span class="small muted" id="endTip"></span><button class="btn primary" id="again">Play again</button></div>
+  </section>
+</div>
+
+<script src="levels.js"></script>
+<script id="core">
+/* ---------- scoring (tested by test.mjs) ---------- */
+const Game = (() => {
+  // flagged: Set of feature names the player marked as leaks
+  function scoreLevel(level, flagged) {
+    const results = level.features.map(f => {
+      const said = flagged.has(f.name), correct = said === f.leak;
+      return { ...f, said, correct, kind: correct ? (f.leak ? "caught" : "cleared") : (f.leak ? "missed" : "false_alarm") };
+    });
+    const right = results.filter(r => r.correct).length, perfect = right === results.length;
+    return { results, right, total: results.length, perfect, points: right + (perfect ? 2 : 0) };
+  }
+  // mistakes across levels: counts by leak type for misses and false alarms, plus the list
+  function summarize(levelResults) {
+    const byType = {}, list = [];
+    for (const { level, res } of levelResults) for (const r of res.results) if (!r.correct) {
+      const key = r.kind + ":" + r.type; byType[key] = (byType[key] || 0) + 1; list.push({ level: level.title, ...r });
+    }
+    const sorted = Object.entries(byType).map(([k, n]) => { const [kind, type] = k.split(":"); return { kind, type, n }; }).sort((a, b) => b.n - a.n);
+    const totals = levelResults.reduce((t, { res }) => ({ points: t.points + res.points, right: t.right + res.right, total: t.total + res.total, perfect: t.perfect + res.perfect }), { points: 0, right: 0, total: 0, perfect: 0 });
+    return { byType: sorted, list, ...totals };
+  }
+  const maxPoints = levels => levels.reduce((s, l) => s + l.features.length + 2, 0);
+  function shuffle(xs, rnd = Math.random) { const a = xs.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+  return { scoreLevel, summarize, maxPoints, shuffle };
+})();
+if (typeof module !== "undefined") module.exports = Game;
+</script>
+<script>
+const { LEVELS, TYPES } = window.LeakData, $ = id => document.getElementById(id);
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+let idx = 0, flagged = new Set(), done = [], order = [], submitted = false;
+const MAX = Game.maxPoints(LEVELS);
+
+function show(id) { ["intro", "level", "end"].forEach(s => ($(s).hidden = s !== id)); $("hud").hidden = $("prog").hidden = id === "intro"; window.scrollTo(0, 0); }
+function start() { idx = 0; done = []; show("level"); load(); }
+function load() {
+  const L = LEVELS[idx]; flagged = new Set(); submitted = false; order = Game.shuffle(L.features);
+  $("lvTitle").textContent = `Case ${idx + 1} of ${LEVELS.length} · ${L.emoji} ${L.title}`;
+  $("lvTask").textContent = L.task; $("lvWhen").textContent = L.when;
+  const nowIdx = L.timeline.findIndex(t => /prediction/i.test(t));
+  $("lvTimeline").innerHTML = L.timeline.map((t, i) => `<div class="tl ${i === nowIdx ? "now" : i > nowIdx ? "future" : ""}">${t}</div>`).join("");
+  $("lvScore").textContent = ""; $("submit").hidden = false; $("next").hidden = true;
+  renderFeats(); hud();
+}
+function renderFeats(res) {
+  const map = res ? Object.fromEntries(res.results.map(r => [r.name, r])) : null;
+  $("lvFeats").innerHTML = order.map(f => {
+    if (!map) return `<button class="feat" aria-pressed="${flagged.has(f.name)}" data-n="${f.name}"><code>${f.name}</code><span class="tag"></span></button>`;
+    const r = map[f.name];
+    return `<div class="feat revealed ${r.correct ? "right" : "wrong"}"><code>${f.name}</code>
+      <div class="verdict ${r.correct ? "ok" : "bad"}">${r.leak ? "🚩 LEAK" : "✅ fine"} · ${TYPES[r.type].label}${r.correct ? "" : r.leak ? " (you missed it)" : " (false alarm)"}</div>
+      <div class="why">${r.why}</div></div>`;
+  }).join("");
+  if (!map) document.querySelectorAll(".feat").forEach(b => b.addEventListener("click", () => { const n = b.dataset.n; flagged.has(n) ? flagged.delete(n) : flagged.add(n); b.setAttribute("aria-pressed", flagged.has(n)); }));
+}
+function submit() {
+  if (submitted) return; submitted = true;
+  const L = LEVELS[idx], res = Game.scoreLevel(L, flagged); done.push({ level: L, res });
+  renderFeats(res);
+  const leaks = L.features.filter(f => f.leak).length, caught = res.results.filter(r => r.kind === "caught").length, fa = res.results.filter(r => r.kind === "false_alarm").length;
+  $("lvScore").innerHTML = `${res.perfect ? "🎯 Perfect! " : ""}+${res.points} points · caught ${caught}/${leaks} leaks${fa ? ` · ${fa} false alarm${fa > 1 ? "s" : ""}` : ""}`;
+  $("submit").hidden = true; $("next").hidden = false; $("next").textContent = idx === LEVELS.length - 1 ? "See my report →" : "Next case →";
+  hud();
+}
+function hud() {
+  const pts = done.reduce((s, d) => s + d.res.points, 0), best = store.get("leak-best", null);
+  $("hLevel").textContent = Math.min(idx + 1, LEVELS.length); $("hScore").textContent = pts; $("hBest").textContent = best === null ? "–" : best;
+  $("progBar").style.width = (100 * done.length / LEVELS.length) + "%";
+}
+function finish() {
+  const s = Game.summarize(done), best = store.get("leak-best", null), isBest = best === null || s.points > best;
+  if (isBest) store.set("leak-best", s.points);
+  show("end"); hud();
+  $("endScore").textContent = `${s.points} / ${MAX}`;
+  $("endSub").innerHTML = `${s.right} of ${s.total} features classified correctly (${Math.round(100 * s.right / s.total)}%) · ${s.perfect} perfect case${s.perfect === 1 ? "" : "s"}${isBest ? " · 🏆 new best" : ""}`;
+  const mx = Math.max(1, ...s.byType.map(t => t.n));
+  $("endTypes").innerHTML = s.byType.length ? s.byType.map(t => `<div class="bar"><span>${t.kind === "missed" ? "Missed leak" : "False alarm"}: ${TYPES[t.type].label.toLowerCase()}</span><div class="t"><div style="width:${100 * t.n / mx}%;background:${t.kind === "missed" ? "var(--leak)" : "var(--warn)"}"></div></div><b>${t.n}</b></div>`).join("")
+    : `<p>No mistakes at all. You'd make a great model auditor. 🕵️</p>`;
+  $("endList").innerHTML = s.list.length ? "<tr><th>Case</th><th>Feature</th><th>Why</th></tr>" + s.list.map(r => `<tr><td>${r.level}</td><td><code>${r.name}</code><br><span class="small" style="color:${r.leak ? "var(--leak)" : "var(--warn)"}">${r.leak ? "missed leak" : "false alarm"}</span></td><td class="small">${r.why}</td></tr>`).join("") : "";
+  const top = s.byType[0];
+  $("endTip").textContent = !top ? "" : top.kind === "missed"
+    ? `Most common slip: ${TYPES[top.type].label.toLowerCase()}. Ask "could I know this at the exact moment of prediction?"`
+    : `Most common slip: flagging ${TYPES[top.type].label.toLowerCase()}. Past data is fine as long as it stops before the prediction moment.`;
+}
+$("start").addEventListener("click", start);
+$("submit").addEventListener("click", submit);
+$("next").addEventListener("click", () => { if (idx < LEVELS.length - 1) { idx++; load(); } else finish(); });
+$("again").addEventListener("click", start);
+hud();
+// ?demo=N plays N levels with a sloppy player (flags anything with outcome-ish words) for screenshots; ?reveal=1 shows the current answers
+const qs = new URLSearchParams(location.search);
+if (qs.has("demo")) {
+  start(); const n = +qs.get("demo"), rnd = (() => { let a = 7; return () => ((a = (a * 16807) % 2147483647) / 2147483647); })();
+  for (let i = 0; i < n; i++) { LEVELS[idx].features.forEach(f => { if (f.leak ? rnd() < 0.75 : rnd() < 0.15) flagged.add(f.name); }); submit(); if (i < n - 1 || n < LEVELS.length) { if (idx < LEVELS.length - 1 && i < n - 1) { idx++; load(); } } }
+  if (n >= LEVELS.length) finish(); else if (qs.get("reveal") !== "1") { idx++; load(); LEVELS[idx].features.slice(0, 3).forEach(f => flagged.add(f.name)); renderFeats(); }
+}
+</script>
+</body>
+</html>
